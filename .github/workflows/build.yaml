@@ -2,6 +2,8 @@ name: Docker image build.
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "0 2 */7 * *"
   push:
     paths-ignore:
     - '**.md'
@@ -92,27 +94,3 @@ jobs:
         with:
           image: "${{ needs.prepare.outputs.DOCKER_IMAGE }}:latest"
           fail-build: false
-
-  # release:
-  #   name: Create Release
-  #   runs-on: ubuntu-20.04
-  #   needs: [ prepare, build ]
-  #   steps:
-  #     - name: Checkout code
-  #       uses: actions/checkout@v2
-  #       with:
-  #         fetch-depth: 0
-  #     - name: Get list of the commits since last release
-  #       run: |
-  #         echo "$(git log $(git describe --tags --abbrev=0)..HEAD --pretty=format:"%h %s")" > .release_notes
-  #     - name: Create Release
-  #       id: create_release
-  #       uses: actions/create-release@main
-  #       env:
-  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  #       with:
-  #         tag_name: v${{ github.event.repository.name }}/${{ needs.prepare.outputs.RELEASE_VERSION }}
-  #         release_name: v${{ needs.prepare.outputs.RELEASE_VERSION }}
-  #         body_path: .release_notes
-  #         draft: false
-  #         prerelease: ${{ github.ref != 'refs/heads/master' && github.ref != 'refs/heads/main' }}
