@@ -1,0 +1,118 @@
+name: Docker image build.
+
+on:
+  workflow_dispatch:
+  push:
+    paths-ignore:
+    - '**.md'
+    branches:
+      - "master"
+      - "main"
+
+jobs:
+  prepare:
+    name: Preparing build context
+    runs-on: ubuntu-latest
+    outputs:
+      SANITISED_REPOSITORY_NAME: ${{ steps.get_env.outputs.SANITISED_REPOSITORY_NAME }}
+      DOCKER_IMAGE: ${{ steps.get_env.outputs.DOCKER_IMAGE }}
+      KUSTOMIZE_VERSION: ${{ steps.get_env.outputs.KUSTOMIZE_VERSION }}
+      KUBECTL_VERSION: ${{ steps.get_env.outputs.KUBECTL_VERSION }}
+      DOCKER_IMAGE_SEMVER: ${{ steps.semver.outputs.semantic_version }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: '0'
+      - name: Setting environment variables
+        id: get_env
+        run: |
+          TMP_SANITISED_REPOSITORY_NAME=$(echo ${{ github.event.repository.name }} | sed -e 's|\.|-|g')
+          echo "::set-output name=SANITISED_REPOSITORY_NAME::$TMP_SANITISED_REPOSITORY_NAME"
+          echo "::set-output name=DOCKER_IMAGE::ghcr.io/${{ github.repository_owner }}/$TMP_SANITISED_REPOSITORY_NAME"
+          KUSTOMIZE_VERSION=$(curl --silent "https://api.github.com/repos/kubernetes-sigs/kustomize/releases" | grep '"tag_name": "kustomize/' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' | sed -E 's/kustomize\///')
+          echo "::set-output name=KUSTOMIZE_VERSION::$KUSTOMIZE_VERSION"
+          KUBECTL_VERSION=$(curl -L -s  https://dl.k8s.io/release/stable.txt)
+          echo "::set-output name=KUBECTL_VERSION::$KUBECTL_VERSION"
+      - name: Establish semver
+        id: semver
+        uses: lukaszraczylo/semver-generator@v1
+        with:
+          config_file: semver.yaml
+          repository_local: true
+          github_username: $GHCR_TOKEN_USER
+          github_token: ${{ secrets.ghcr-token }}
+      - name: Semver check
+        run: |
+          echo "Semantic version detected: ${{ steps.semver.outputs.semantic_version }}"
+
+  build:
+    needs: [ prepare ]
+    name: Docker image build (multiarch)
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v2
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+      - name: Login to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v1
+        with:
+          registry: ghcr.io
+          username: ${{ github.ACTOR }}
+          password: ${{ secrets.GHCR_TOKEN }}
+      - name: Prepare for push
+        id: prep
+        run: |
+          TAGS="${{ needs.prepare.outputs.DOCKER_IMAGE }}:${{ needs.prepare.outputs.DOCKER_IMAGE_SEMVER }},${{ needs.prepare.outputs.DOCKER_IMAGE }}:latest,${{ needs.prepare.outputs.DOCKER_IMAGE }}:kubectl-${{ needs.prepare.outputs.KUBECTL_VERSION }},${{ needs.prepare.outputs.DOCKER_IMAGE }}:kustomize-${{ needs.prepare.outputs.KUSTOMIZE_VERSION }},${{ needs.prepare.outputs.DOCKER_IMAGE }}:$GITHUB_RUN_NUMBER"
+          echo ::set-output name=tags::${TAGS}
+          LABELS="org.opencontainers.image.revision=${{ needs.prepare.outputs.DOCKER_IMAGE_SEMVER }}"
+          LABELS="$LABELS,org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          LABELS="$LABELS,org.opencontainers.image.version=${{ needs.prepare.outputs.DOCKER_IMAGE_SEMVER }}-kctl${{ needs.prepare.outputs.KUBECTL_VERSION }}-kust${{ needs.prepare.outputs.KUSTOMIZE_VERSION }}"
+          LABELS="$LABELS,com.github.repo.branch=main"
+          LABELS="$LABELS,com.github.repo.dockerfile=Dockerfile"
+          echo ::set-output name=labels::${LABELS}
+
+      - name: Build image
+        id: docker_build
+        uses: docker/build-push-action@v2
+        with:
+          builder: ${{ steps.buildx.outputs.name }}
+          platforms: linux/arm64,linux/amd64
+          push: ${{ github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' }}
+          tags: ${{ steps.prep.outputs.tags }}
+          labels: ${{ steps.prep.outputs.labels }}
+          no-cache: false
+      - name: Scan image
+        uses: anchore/scan-action@v2
+        if: ${{ github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' }}
+        with:
+          image: "${{ needs.prepare.outputs.DOCKER_IMAGE }}:latest"
+          fail-build: false
+
+  # release:
+  #   name: Create Release
+  #   runs-on: ubuntu-20.04
+  #   needs: [ prepare, build ]
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v2
+  #       with:
+  #         fetch-depth: 0
+  #     - name: Get list of the commits since last release
+  #       run: |
+  #         echo "$(git log $(git describe --tags --abbrev=0)..HEAD --pretty=format:"%h %s")" > .release_notes
+  #     - name: Create Release
+  #       id: create_release
+  #       uses: actions/create-release@main
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #       with:
+  #         tag_name: v${{ github.event.repository.name }}/${{ needs.prepare.outputs.RELEASE_VERSION }}
+  #         release_name: v${{ needs.prepare.outputs.RELEASE_VERSION }}
+  #         body_path: .release_notes
+  #         draft: false
+  #         prerelease: ${{ github.ref != 'refs/heads/master' && github.ref != 'refs/heads/main' }}
