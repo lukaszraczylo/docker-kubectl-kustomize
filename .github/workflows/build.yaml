@@ -29,7 +29,7 @@ jobs:
       - name: Setting environment variables
         id: get_env
         run: |
-          TMP_SANITISED_REPOSITORY_NAME=$(echo $GITHUB_REPOSITORY | sed -e 's|\.|-|g')
+          TMP_SANITISED_REPOSITORY_NAME=$(echo ${{ github.event.repository.name }} | sed -e 's|\.|-|g')
           echo "::set-output name=SANITISED_REPOSITORY_NAME::$TMP_SANITISED_REPOSITORY_NAME"
           echo "::set-output name=DOCKER_IMAGE::ghcr.io/${{ github.repository_owner }}/$TMP_SANITISED_REPOSITORY_NAME"
           KUSTOMIZE_VERSION=$(curl --silent "https://api.github.com/repos/kubernetes-sigs/kustomize/releases" | grep '"tag_name": "kustomize/' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' | sed -E 's/kustomize\///')
