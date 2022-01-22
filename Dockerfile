@@ -1,13 +1,20 @@
-FROM alpine
 ARG TARGETPLATFORM
+ARG HELM_VERSION=3.7.1
+ARG KUSTOMIZE_VERSION=v3.8.7
+ARG KUBECTL_VERSION=1.23.2
+
+FROM k8s.gcr.io/kustomize/kustomize:${KUSTOMIZE_VERSION} AS kustomize
+FROM alpine/helm:${HELM_VERSION} AS helm
+
+FROM alpine
 WORKDIR /srv
-RUN apk add curl git openssl && \
-    rm -rf /var/cache/apk/*
-RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/${TARGETPLATFORM}/kubectl" && chmod +x kubectl && mv kubectl /usr/bin/kubectl
-RUN echo "https://api.github.com/repos/kubernetes-sigs/kustomize/releases/tags/${KUSTOMIZE_RELEASE}/download/$(echo $KUSTOMIZE_RELEASE | sed -E 's/\//_/' )_$(echo ${TARGETPLATFORM} | sed -E 's/\//_/').tar.gz"
-RUN KUSTOMIZE_RELEASE=$(curl --silent "https://api.github.com/repos/kubernetes-sigs/kustomize/releases" | grep '"tag_name": "kustomize/' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/') && \
-    curl -LO "https://github.com/kubernetes-sigs/kustomize/releases/download/$( echo ${KUSTOMIZE_RELEASE} | sed -E 's/\//%2F/g' )/$(echo $KUSTOMIZE_RELEASE | sed -E 's/\//_/' )_$(echo ${TARGETPLATFORM} | sed -E 's/\//_/').tar.gz" && \
-    tar -zxf $(echo $KUSTOMIZE_RELEASE | sed -E 's/\//_/' )_$(echo ${TARGETPLATFORM} | sed -E 's/\//_/').tar.gz && mv kustomize /usr/bin/kustomize && chmod +x /usr/bin/kustomize && rm -fr *.tar.gz
-RUN curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | sh
+COPY run.sh /srv/run.sh
+RUN apk add curl git openssl jq && \
+    rm -rf /var/cache/apk/* && \
+    chmod +x /srv/run.sh
+
+COPY --from=kustomize /app/kustomize /usr/bin/kustomize
+COPY --from=helm /usr/bin/helm /usr/bin/helm
+RUN curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/${TARGETPLATFORM}/kubectl" && chmod +x kubectl && mv kubectl /usr/bin/kubectl
 RUN mkdir -p /srv/.config/gcloud /srv/.config /srv/.kube /srv/data /srv/.skaffold && chown -R nobody:nogroup /srv
 ENTRYPOINT ["/srv/run.sh"]
