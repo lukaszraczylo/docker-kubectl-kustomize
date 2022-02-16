@@ -8,7 +8,7 @@ RUN apk add curl openssl && \
 RUN curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/${TARGETPLATFORM:-linux/amd64}/kubectl" && chmod +x kubectl && mv kubectl /usr/bin/kubectl
 RUN curl https://api.github.com/repos/kubernetes-sigs/kustomize/releases/tags/kustomize/${KUSTOMIZE_VERSION} | grep "browser_.*$(echo ${TARGETPLATFORM:-linux/amd64} | sed -E 's/\//_/')" | cut -d '"' -f 4 > kustomize.txt
 RUN curl -L $(cat kustomize.txt) -o kustomize.tar.gz && tar -zxf kustomize.tar.gz && chmod +x kustomize && mv kustomize /usr/bin/kustomize
-RUN curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | sh
+RUN curl -L https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 -o helm.sh && chmod +x helm.sh && sh helm.sh -v v${HELM_VERSION}
 
 FROM alpine
 WORKDIR /srv
